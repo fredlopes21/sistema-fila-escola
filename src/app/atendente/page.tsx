@@ -3,13 +3,17 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { Megaphone, MapPin, CheckCircle, LogOut, User } from 'lucide-react'
+import { Megaphone, MapPin, CheckCircle, LogOut, User, RotateCcw } from 'lucide-react'
 
 export default function AtendentePage() {
   const router = useRouter()
   const [usuario, setUsuario] = useState<any>(null)
   const [nomeGuiche, setNomeGuiche] = useState('Carregando...')
+  
+  // Estados da Senha
   const [senhaAtual, setSenhaAtual] = useState<number | null>(null)
+  const [ultimoTipo, setUltimoTipo] = useState<string>('normal') // Para saber se repete como pref ou normal
+  
   const [loading, setLoading] = useState(false)
   const [feedback, setFeedback] = useState('')
 
@@ -27,11 +31,9 @@ export default function AtendentePage() {
     const user = JSON.parse(sessao)
     setUsuario(user)
 
-    // Se o usuário tem um guichê vinculado, pegamos o nome dele
     if (user.fe_guiches) {
         setNomeGuiche(user.fe_guiches.nome)
     } else {
-        // Caso seja um admin testando ou usuário sem guichê
         setNomeGuiche('Sem Guichê Vinculado')
     }
   }
@@ -42,17 +44,21 @@ export default function AtendentePage() {
   }
 
   async function carregarUltimaSenha() {
+    // Busca a config do contador
     const { data } = await supabase.from('fe_config').select('valor').eq('chave', 'contador_atual').single()
     if (data) setSenhaAtual(data.valor)
+    
+    // Tenta descobrir qual foi o tipo da última (para o botão repetir funcionar melhor ao recarregar pag)
+    const { data: ultChamada } = await supabase.from('fe_chamadas').select('tipo').order('id', { ascending: false }).limit(1).single()
+    if (ultChamada) setUltimoTipo(ultChamada.tipo)
   }
 
   async function chamarProxima(preferencial: boolean = false) {
-    if (!usuario || !usuario.fe_guiches) return alert('Você não tem um guichê vinculado. Peça ao admin.')
+    if (!usuario || !usuario.fe_guiches) return alert('Sem guichê vinculado.')
     
     setLoading(true)
     setFeedback('')
     try {
-      // Passamos o nome do guichê que está no objeto do usuário logado
       const { data, error } = await supabase
         .rpc('fe_chamar_proxima_senha', { 
             nome_guiche: usuario.fe_guiches.nome, 
@@ -63,6 +69,7 @@ export default function AtendentePage() {
 
       if (data && data.length > 0) {
           setSenhaAtual(data[0].nova_senha)
+          setUltimoTipo(preferencial ? 'preferencial' : 'normal')
           setFeedback(`Senha ${data[0].nova_senha} chamada!`)
           setTimeout(() => setFeedback(''), 3000)
       }
@@ -71,6 +78,26 @@ export default function AtendentePage() {
       alert('Erro ao chamar senha.')
     } finally {
       setLoading(false)
+    }
+  }
+
+  // NOVA FUNÇÃO: REPETIR
+  async function repetirChamada() {
+    if (!usuario || !usuario.fe_guiches || senhaAtual === null) return
+    
+    setLoading(true)
+    try {
+        await supabase.rpc('fe_repetir_senha', {
+            p_numero: senhaAtual,
+            p_guiche: usuario.fe_guiches.nome,
+            p_tipo: ultimoTipo
+        })
+        setFeedback(`Senha ${senhaAtual} repetida!`)
+        setTimeout(() => setFeedback(''), 3000)
+    } catch (error) {
+        console.error(error)
+    } finally {
+        setLoading(false)
     }
   }
 
@@ -97,29 +124,39 @@ export default function AtendentePage() {
 
       <div className="flex-1 max-w-2xl w-full mx-auto p-6 flex flex-col justify-center">
         
-        {/* Card Principal */}
         <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">
             
             {/* Info do Local */}
-            <div className="bg-slate-50 p-6 border-b border-gray-100 text-center">
+            <div className="bg-slate-50 p-4 border-b border-gray-100 text-center">
                 <label className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1 flex items-center justify-center gap-1">
-                    <MapPin className="w-3 h-3" /> Seu Local de Atendimento
+                    <MapPin className="w-3 h-3" /> Local de Atendimento
                 </label>
-                <div className="text-2xl font-bold text-blue-900">{nomeGuiche}</div>
-                {!usuario?.fe_guiches && (
-                    <p className="text-xs text-red-400 mt-2 bg-red-50 p-2 rounded">
-                        Aviso: Seu usuário não foi vinculado a nenhum guichê no painel Admin.
-                    </p>
-                )}
+                <div className="text-xl font-bold text-blue-900">{nomeGuiche}</div>
             </div>
 
             <div className="p-8">
                 {/* Display Senha */}
-                <div className="text-center mb-10">
+                <div className="text-center mb-8">
                     <span className="text-sm font-medium text-gray-400 uppercase">Última senha chamada</span>
-                    <div className="text-7xl font-bold text-slate-800 mt-2 font-mono tracking-tighter">
-                        {senhaAtual ?? '---'}
+                    
+                    <div className="flex items-center justify-center gap-4 mt-2">
+                         <div className="text-7xl font-bold text-slate-800 font-mono tracking-tighter">
+                            {senhaAtual ?? '---'}
+                        </div>
                     </div>
+
+                    {/* BOTÃO REPETIR (NOVO) */}
+                    <div className="mt-4">
+                        <button 
+                            onClick={repetirChamada}
+                            disabled={loading || senhaAtual === null}
+                            className="inline-flex items-center gap-2 text-slate-500 bg-slate-100 hover:bg-slate-200 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                        >
+                            <RotateCcw className="w-4 h-4" />
+                            Chamar Novamente
+                        </button>
+                    </div>
+
                     {feedback && (
                         <div className="mt-4 inline-flex items-center gap-2 text-emerald-600 bg-emerald-50 px-4 py-2 rounded-full text-sm font-medium animate-fadeIn">
                             <CheckCircle className="w-4 h-4" /> {feedback}
@@ -127,7 +164,7 @@ export default function AtendentePage() {
                     )}
                 </div>
 
-                {/* Botões de Ação */}
+                {/* Botões Principais */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <button 
                         onClick={() => chamarProxima(false)}
@@ -135,7 +172,8 @@ export default function AtendentePage() {
                         className="group relative flex flex-col items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white p-8 rounded-2xl transition-all shadow-lg hover:shadow-blue-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         <Megaphone className="w-8 h-8 mb-1 group-hover:scale-110 transition-transform" />
-                        <span className="text-xl font-bold">Chamar Normal</span>
+                        <span className="text-xl font-bold">PRÓXIMO</span>
+                        <span className="text-blue-200 text-xs">Chamar Normal</span>
                     </button>
 
                     <button 
@@ -144,7 +182,8 @@ export default function AtendentePage() {
                         className="group relative flex flex-col items-center justify-center gap-2 bg-white border-2 border-orange-400 hover:bg-orange-50 text-orange-600 p-8 rounded-2xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         <Megaphone className="w-8 h-8 mb-1 group-hover:scale-110 transition-transform" />
-                        <span className="text-xl font-bold">Prioridade</span>
+                        <span className="text-xl font-bold">PRIORIDADE</span>
+                        <span className="text-orange-400 text-xs">Atendimento Preferencial</span>
                     </button>
                 </div>
             </div>
