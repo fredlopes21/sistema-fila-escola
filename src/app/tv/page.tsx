@@ -7,7 +7,10 @@ import { CloudSun, Play } from 'lucide-react'
 interface Chamada { id: number; senha_numero: number; guiche_nome: string; tipo: string; }
 interface Noticia { id: number; title: { rendered: string }; jetpack_featured_media_url?: string; link: string; _embedded?: { 'wp:featuredmedia'?: Array<{ source_url?: string }> } }
 function getImagemNoticia(post: Noticia): string | null {
-  if (post._embedded && post._embedded['wp:featuredmedia'] && post._embedded['wp:featuredmedia'][0]) return post._embedded['wp:featuredmedia'][0].source_url;
+  if (post._embedded && post._embedded['wp:featuredmedia'] && post._embedded['wp:featuredmedia'][0]) {
+    // A CORREÇÃO ESTÁ AQUI: Adicionamos "|| null" ao final
+    return post._embedded['wp:featuredmedia'][0].source_url || null;
+  }
   return post.jetpack_featured_media_url || null;
 }
 
