@@ -115,6 +115,15 @@ export default function TvPage() {
   }, [audioHabilitado, tipoAlerta]) // IMPORTANTE: Recria o listener se o tipo de alerta mudar
 
   const falarSenha = (texto: string) => {
+    // 1. Tenta usar o Fully Kiosk (Fire TV / Android)
+    // @ts-ignore
+    if (window.fully && typeof window.fully.textToSpeech === 'function') {
+      // @ts-ignore
+      window.fully.textToSpeech(texto);
+      return;
+    }
+
+    // 2. Fallback: Navegador Padrão (PC / Chrome)
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel()
       const u = new SpeechSynthesisUtterance(texto)
