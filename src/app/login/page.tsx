@@ -74,13 +74,13 @@ export default function LoginPage() {
             <div className="relative">
               <User className="absolute left-3 top-3 text-gray-400 w-5 h-5" />
               <input 
-                type="text" 
-                required
-                value={login}
-                onChange={e => setLogin(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                placeholder="Seu login"
-              />
+              type="text" 
+              required
+              value={login}
+              onChange={e => setLogin(e.target.value)}
+              className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg text-slate-900 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+              placeholder="Seu login"
+            />
             </div>
           </div>
 
@@ -93,7 +93,7 @@ export default function LoginPage() {
                 required
                 value={senha}
                 onChange={e => setSenha(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg text-slate-900 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
                 placeholder="••••••"
               />
             </div>
