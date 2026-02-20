@@ -27,6 +27,7 @@ export default function TvPage() {
   const [tipoAlerta, setTipoAlerta] = useState('completo') // NOVO
   
   const ultimoIdProcessado = useRef<number>(0)
+  const indiceFonteAtual = useRef<number>(0);
 
   useEffect(() => {
     async function carregarDados() {
@@ -46,7 +47,11 @@ export default function TvPage() {
            if (cAlerta && cAlerta.valor_texto) setTipoAlerta(cAlerta.valor_texto)
         }
         setListaFontes(fontes)
-        buscarNoticias(fontes[Math.floor(Math.random() * fontes.length)])
+        
+        // CORREÇÃO: Pega sempre a primeira fonte da lista ao iniciar
+        indiceFonteAtual.current = 0;
+        buscarNoticias(fontes[0]);
+        
         buscarUltimaChamada(false)
       } catch (e) { console.error(e) }
     }
@@ -101,7 +106,14 @@ export default function TvPage() {
     const intervalo = setInterval(() => {
       setIndiceNoticia((prev) => {
           const proximo = prev + 1
-          if (proximo >= noticias.length) { buscarNoticias(listaFontes[Math.floor(Math.random() * listaFontes.length)]); return 0 }
+          
+          // CORREÇÃO: Alterna sequencialmente entre as fontes cadastradas
+          if (proximo >= noticias.length) { 
+              indiceFonteAtual.current = (indiceFonteAtual.current + 1) % listaFontes.length;
+              buscarNoticias(listaFontes[indiceFonteAtual.current]); 
+              return 0;
+          }
+          
           return proximo
       })
     }, tempoRotacao)
