@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { Settings, Trash2, Plus, Save, Monitor, Newspaper, Users, LogOut, X, Volume2, Ticket, Printer, Edit } from 'lucide-react'
+import { Settings, Trash2, Plus, Save, Monitor, Users, LogOut, X, Volume2, Ticket, Printer, Edit, Music } from 'lucide-react'
 
 export default function AdminPage() {
   const router = useRouter()
@@ -19,7 +19,7 @@ export default function AdminPage() {
   const [guiches, setGuiches] = useState<any[]>([])
   const [novoGuicheNome, setNovoGuicheNome] = useState('')
   const [novoGuicheNumero, setNovoGuicheNumero] = useState('')
-  const [editandoGuicheId, setEditandoGuicheId] = useState<number | null>(null) // Controle de Edição
+  const [editandoGuicheId, setEditandoGuicheId] = useState<number | null>(null)
 
   // DADOS NOTÍCIAS & TV
   const [exibirNoticias, setExibirNoticias] = useState(true)
@@ -27,6 +27,10 @@ export default function AdminPage() {
   const [listaFontes, setListaFontes] = useState<string[]>([])
   const [novaFonteUrl, setNovaFonteUrl] = useState('')
   const [tipoAlerta, setTipoAlerta] = useState('completo')
+  
+  // DADOS ÁUDIO PERSONALIZADO
+  const [urlMp3Personalizado, setUrlMp3Personalizado] = useState('')
+  const [fazendoUpload, setFazendoUpload] = useState(false)
 
   // DADOS USUÁRIOS
   const [usuarios, setUsuarios] = useState<any[]>([])
@@ -34,7 +38,7 @@ export default function AdminPage() {
   const [novoUserLogin, setNovoUserLogin] = useState('')
   const [novoUserSenha, setNovoUserSenha] = useState('')
   const [novoUserGuiche, setNovoUserGuiche] = useState('')
-  const [editandoUserId, setEditandoUserId] = useState<number | null>(null) // Controle de Edição
+  const [editandoUserId, setEditandoUserId] = useState<number | null>(null)
 
   useEffect(() => {
     verificarAcesso()
@@ -78,6 +82,10 @@ export default function AdminPage() {
 
       const cModo = configs.find(c => c.chave === 'modo_operacao')
       if (cModo && cModo.valor_texto) setModoOperacao(cModo.valor_texto)
+
+      // Carrega MP3 personalizado se houver
+      const cMp3 = configs.find(c => c.chave === 'url_alerta_mp3')
+      if (cMp3 && cMp3.valor_texto) setUrlMp3Personalizado(cMp3.valor_texto)
     }
 
     // 2. Guichês e Usuários
@@ -128,19 +136,9 @@ export default function AdminPage() {
     if (!novoGuicheNome || !novoGuicheNumero) return alert('Preencha os dados.')
     
     if (editandoGuicheId) {
-        // Atualizar
-        await supabase.from('fe_guiches').update({ 
-            nome: novoGuicheNome, 
-            numero: parseInt(novoGuicheNumero) 
-        }).eq('id', editandoGuicheId)
-        alert('Guichê atualizado com sucesso!')
+        await supabase.from('fe_guiches').update({ nome: novoGuicheNome, numero: parseInt(novoGuicheNumero) }).eq('id', editandoGuicheId)
     } else {
-        // Criar Novo
-        await supabase.from('fe_guiches').insert({ 
-            nome: novoGuicheNome, 
-            numero: parseInt(novoGuicheNumero), 
-            ativo: true 
-        })
+        await supabase.from('fe_guiches').insert({ nome: novoGuicheNome, numero: parseInt(novoGuicheNumero), ativo: true })
     }
     
     cancelarEdicaoGuiche()
@@ -173,29 +171,15 @@ export default function AdminPage() {
     const guicheId = novoUserGuiche ? parseInt(novoUserGuiche) : null
     
     if (editandoUserId) {
-        // Atualizar
         const { error } = await supabase.from('fe_usuarios').update({
             nome: novoUserNome, login: novoUserLogin, senha: novoUserSenha, guiche_id: guicheId
         }).eq('id', editandoUserId)
-        
-        if (!error) {
-            alert('Usuário atualizado com sucesso!')
-            cancelarEdicaoUsuario()
-            carregarTudo()
-        } else alert('Erro ao atualizar: ' + error.message)
+        if (!error) { cancelarEdicaoUsuario(); carregarTudo() } else alert('Erro: ' + error.message)
     } else {
-        // Criar Novo
         const { error } = await supabase.from('fe_usuarios').insert({
             nome: novoUserNome, login: novoUserLogin, senha: novoUserSenha, perfil: 'atendente', guiche_id: guicheId
         })
-        
-        if (!error) {
-            cancelarEdicaoUsuario()
-            carregarTudo()
-        } else {
-            if (error.code === '23505') alert('Este login já existe!')
-            else alert('Erro: ' + error.message)
-        }
+        if (!error) { cancelarEdicaoUsuario(); carregarTudo() } else alert(error.code === '23505' ? 'Login já existe!' : 'Erro: ' + error.message)
     }
   }
 
@@ -203,7 +187,7 @@ export default function AdminPage() {
       if(confirm('Remover usuário?')) { await supabase.from('fe_usuarios').delete().eq('id', id); carregarTudo() } 
   }
 
-  // --- AÇÕES DA TV ---
+  // --- AÇÕES DA TV & ÁUDIO ---
   async function salvarConfigsTV() {
     await supabase.from('fe_config').upsert([
         { chave: 'exibir_noticias', valor: exibirNoticias ? 1 : 0 },
@@ -216,6 +200,37 @@ export default function AdminPage() {
 
   function adicionarFonte() { if(novaFonteUrl) { setListaFontes([...listaFontes, novaFonteUrl]); setNovaFonteUrl('') } }
   function removerFonte(idx: number) { const n = [...listaFontes]; n.splice(idx, 1); setListaFontes(n) }
+
+  // UPLOAD DO MP3
+  async function handleUploadMp3(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    
+    setFazendoUpload(true)
+    const fileName = `alerta-${Date.now()}.mp3`
+    
+    const { error } = await supabase.storage.from('audios').upload(fileName, file)
+    
+    if (error) {
+        alert('Erro ao enviar áudio. Verifique se executou o script SQL de criação do bucket. Erro: ' + error.message)
+        setFazendoUpload(false)
+        return
+    }
+    
+    const { data: { publicUrl } } = supabase.storage.from('audios').getPublicUrl(fileName)
+    await supabase.from('fe_config').upsert({ chave: 'url_alerta_mp3', valor_texto: publicUrl, valor: 0 })
+    
+    setUrlMp3Personalizado(publicUrl)
+    setFazendoUpload(false)
+    alert('Som personalizado salvo com sucesso!')
+  }
+
+  async function removerMp3() {
+    if(confirm('Remover o som personalizado e voltar para o padrão do sistema?')) {
+        await supabase.from('fe_config').upsert({ chave: 'url_alerta_mp3', valor_texto: '', valor: 0 })
+        setUrlMp3Personalizado('')
+    }
+  }
 
   if (loading) return <div className="flex h-screen items-center justify-center text-slate-500">Carregando...</div>
 
@@ -264,7 +279,8 @@ export default function AdminPage() {
                                 <>
                                     <label className="block text-sm font-medium mb-1 text-blue-800">Definir senha do rolo físico:</label>
                                     <div className="flex gap-2">
-                                        <input type="number" placeholder="Ex: 499" value={novaConfigSenha} onChange={(e) => setNovaConfigSenha(e.target.value)} className="border p-2 rounded w-full md:w-32"/>
+                                        {/* text-slate-900 garantindo a cor legível */}
+                                        <input type="number" placeholder="Ex: 499" value={novaConfigSenha} onChange={(e) => setNovaConfigSenha(e.target.value)} className="border p-2 rounded w-full md:w-32 text-slate-900 bg-white"/>
                                         <button onClick={salvarSenha} className="bg-blue-600 text-white px-4 rounded font-bold hover:bg-blue-700">Definir</button>
                                     </div>
                                     <p className="text-xs text-slate-400 mt-2">Digite o número anterior ao que está na ponta do rolo.</p>
@@ -300,15 +316,14 @@ export default function AdminPage() {
                     ))}
                 </div>
                 
-                {/* FORMULÁRIO DE GUICHÊ */}
                 <div className={`${editandoGuicheId ? 'bg-amber-50 border-amber-200' : 'bg-blue-50 border-blue-100'} p-4 rounded-lg border`}>
                     <h3 className={`text-sm font-bold mb-3 flex items-center gap-2 ${editandoGuicheId ? 'text-amber-800' : 'text-blue-800'}`}>
                         {editandoGuicheId ? <Edit className="w-4 h-4"/> : <Plus className="w-4 h-4"/>} 
                         {editandoGuicheId ? 'Editando Guichê' : 'Novo Guichê'}
                     </h3>
                     <div className="flex gap-3">
-                        <input type="number" placeholder="Nº" className="w-20 p-2 rounded border" value={novoGuicheNumero} onChange={e => setNovoGuicheNumero(e.target.value)}/>
-                        <input type="text" placeholder="Nome" className="flex-1 p-2 rounded border" value={novoGuicheNome} onChange={e => setNovoGuicheNome(e.target.value)}/>
+                        <input type="number" placeholder="Nº" className="w-20 p-2 rounded border text-slate-900 bg-white" value={novoGuicheNumero} onChange={e => setNovoGuicheNumero(e.target.value)}/>
+                        <input type="text" placeholder="Nome" className="flex-1 p-2 rounded border text-slate-900 bg-white" value={novoGuicheNome} onChange={e => setNovoGuicheNome(e.target.value)}/>
                         <button onClick={salvarGuiche} className={`${editandoGuicheId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'} text-white px-4 rounded font-bold`}>
                             {editandoGuicheId ? 'Atualizar' : 'Adicionar'}
                         </button>
@@ -344,17 +359,16 @@ export default function AdminPage() {
                     ))}
                 </div>
                 
-                {/* FORMULÁRIO DE USUÁRIO */}
                 <div className={`${editandoUserId ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-100'} p-5 rounded-lg border`}>
                     <h3 className={`text-sm font-bold mb-4 flex items-center gap-2 ${editandoUserId ? 'text-amber-800' : 'text-emerald-800'}`}>
                         {editandoUserId ? <Edit className="w-4 h-4"/> : <Plus className="w-4 h-4"/>} 
                         {editandoUserId ? 'Editando Usuário' : 'Cadastrar Novo Atendente'}
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                        <input type="text" placeholder="Nome" className="p-2 rounded border" value={novoUserNome} onChange={e => setNovoUserNome(e.target.value)}/>
-                        <input type="text" placeholder="Login" className="p-2 rounded border" value={novoUserLogin} onChange={e => setNovoUserLogin(e.target.value)}/>
-                        <input type="text" placeholder="Senha" className="p-2 rounded border" value={novoUserSenha} onChange={e => setNovoUserSenha(e.target.value)}/>
-                        <select className="p-2 rounded border bg-white" value={novoUserGuiche} onChange={e => setNovoUserGuiche(e.target.value)}>
+                        <input type="text" placeholder="Nome" className="p-2 rounded border text-slate-900 bg-white" value={novoUserNome} onChange={e => setNovoUserNome(e.target.value)}/>
+                        <input type="text" placeholder="Login" className="p-2 rounded border text-slate-900 bg-white" value={novoUserLogin} onChange={e => setNovoUserLogin(e.target.value)}/>
+                        <input type="text" placeholder="Senha" className="p-2 rounded border text-slate-900 bg-white" value={novoUserSenha} onChange={e => setNovoUserSenha(e.target.value)}/>
+                        <select className="p-2 rounded border bg-white text-slate-900" value={novoUserGuiche} onChange={e => setNovoUserGuiche(e.target.value)}>
                             <option value="">Guichê...</option>
                             {guiches.map(g => <option key={g.id} value={g.id}>{g.nome}</option>)}
                         </select>
@@ -390,22 +404,51 @@ export default function AdminPage() {
                     </div>
                 </div>
 
+                {/* UPLOAD DE MP3 PERSONALIZADO */}
+                <div className="pt-6 border-t border-slate-100">
+                    <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+                        <Music className="w-4 h-4"/> Som do Alerta (Ding-Dong)
+                    </label>
+                    <div className="bg-slate-50 p-4 rounded-lg border flex flex-col md:flex-row gap-4 items-center justify-between">
+                        <div className="text-sm">
+                            {urlMp3Personalizado ? (
+                                <span className="text-emerald-600 font-bold flex items-center gap-2">✓ Som personalizado ativo na TV</span>
+                            ) : (
+                                <span className="text-slate-500">Usando som padrão do sistema.</span>
+                            )}
+                        </div>
+                        
+                        <div className="flex gap-2">
+                            {urlMp3Personalizado && (
+                                <button onClick={removerMp3} className="px-3 py-2 bg-red-100 text-red-600 rounded text-sm font-bold hover:bg-red-200">
+                                    Remover
+                                </button>
+                            )}
+                            <label className={`cursor-pointer text-white px-4 py-2 rounded text-sm font-bold transition-colors ${fazendoUpload ? 'bg-slate-400' : 'bg-slate-800 hover:bg-slate-700'}`}>
+                                {fazendoUpload ? 'Enviando...' : 'Enviar arquivo .MP3'}
+                                <input type="file" accept="audio/mp3,audio/mpeg" className="hidden" onChange={handleUploadMp3} disabled={fazendoUpload}/>
+                            </label>
+                        </div>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-2">O arquivo deve ser pequeno (apenas o toque curto) e no formato MP3.</p>
+                </div>
+
                 {exibirNoticias && (
                     <div className="space-y-4 pt-4 border-t">
                         <div>
                             <label className="font-bold text-sm">Tempo Rotação (seg)</label>
-                            <input type="number" value={tempoRotacao} onChange={e => setTempoRotacao(Number(e.target.value))} className="border p-2 rounded w-24 block mt-1"/>
+                            <input type="number" value={tempoRotacao} onChange={e => setTempoRotacao(Number(e.target.value))} className="border p-2 rounded w-24 block mt-1 text-slate-900 bg-white"/>
                         </div>
                         <div>
                             <label className="font-bold text-sm mb-2 block">Fontes (WordPress)</label>
                             {listaFontes.map((url, idx) => (
                                 <div key={idx} className="flex gap-2 mb-2 items-center text-xs bg-slate-50 p-2 rounded border">
-                                    <span className="truncate flex-1">{url}</span>
+                                    <span className="truncate flex-1 text-slate-700">{url}</span>
                                     <button onClick={() => removerFonte(idx)} className="text-red-500"><X className="w-4 h-4"/></button>
                                 </div>
                             ))}
                             <div className="flex gap-2">
-                                <input type="text" placeholder="https://..." className="flex-1 border p-2 rounded text-sm" value={novaFonteUrl} onChange={e => setNovaFonteUrl(e.target.value)}/>
+                                <input type="text" placeholder="https://..." className="flex-1 border p-2 rounded text-sm text-slate-900 bg-white" value={novaFonteUrl} onChange={e => setNovaFonteUrl(e.target.value)}/>
                                 <button onClick={adicionarFonte} className="bg-slate-700 text-white px-3 rounded text-sm">Add</button>
                             </div>
                         </div>

@@ -6,9 +6,9 @@ import { CloudSun, Play } from 'lucide-react'
 
 interface Chamada { id: number; senha_numero: number; guiche_nome: string; tipo: string; }
 interface Noticia { id: number; title: { rendered: string }; jetpack_featured_media_url?: string; link: string; _embedded?: { 'wp:featuredmedia'?: Array<{ source_url?: string }> } }
+
 function getImagemNoticia(post: Noticia): string | null {
   if (post._embedded && post._embedded['wp:featuredmedia'] && post._embedded['wp:featuredmedia'][0]) {
-    // A CORREÇÃO ESTÁ AQUI: Adicionamos "|| null" ao final
     return post._embedded['wp:featuredmedia'][0].source_url || null;
   }
   return post.jetpack_featured_media_url || null;
@@ -24,7 +24,10 @@ export default function TvPage() {
   const [audioHabilitado, setAudioHabilitado] = useState(false)
   const [exibirNoticias, setExibirNoticias] = useState(true)
   const [listaFontes, setListaFontes] = useState<string[]>([])
-  const [tipoAlerta, setTipoAlerta] = useState('completo') // NOVO
+  const [tipoAlerta, setTipoAlerta] = useState('completo')
+  
+  // NOVO: Estado para guardar o link do MP3 personalizado
+  const [urlMp3Personalizado, setUrlMp3Personalizado] = useState('')
   
   const ultimoIdProcessado = useRef<number>(0)
   const indiceFonteAtual = useRef<number>(0);
@@ -33,22 +36,28 @@ export default function TvPage() {
     async function carregarDados() {
       try {
         const { data: configs } = await supabase.from('fe_config').select('*')
-        let fontes = ['https://maristaescolassociais.org.br/wp-json/wp/v2/posts?per_page=5&_embed']
+        let fontes = ['https://maristaescolassociais.org.br/wp-json/wp/v2/posts?per_page=2&_embed']
 
         if (configs) {
            const cTempo = configs.find(c => c.chave === 'tempo_rotacao_noticias')
            if (cTempo) setTempoRotacao(cTempo.valor * 1000)
+           
            const cExibir = configs.find(c => c.chave === 'exibir_noticias')
            if (cExibir) setExibirNoticias(cExibir.valor === 1)
+           
            const cFontes = configs.find(c => c.chave === 'lista_fontes_noticias')
            if (cFontes && cFontes.valor_texto) { try { const p = JSON.parse(cFontes.valor_texto); if(p.length) fontes = p } catch (e) {} }
-           // NOVO: Carregar Config de Som
+           
            const cAlerta = configs.find(c => c.chave === 'tipo_alerta')
            if (cAlerta && cAlerta.valor_texto) setTipoAlerta(cAlerta.valor_texto)
+
+           // Carrega MP3 personalizado
+           const cMp3 = configs.find(c => c.chave === 'url_alerta_mp3')
+           if (cMp3 && cMp3.valor_texto) setUrlMp3Personalizado(cMp3.valor_texto)
         }
         setListaFontes(fontes)
         
-        // CORREÇÃO: Pega sempre a primeira fonte da lista ao iniciar
+        // Inicia pela primeira fonte da lista (sequencial)
         indiceFonteAtual.current = 0;
         buscarNoticias(fontes[0]);
         
@@ -66,7 +75,7 @@ export default function TvPage() {
       try { const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=-21.17&longitude=-47.81&current_weather=true'); const data = await res.json(); setClima(`${Math.round(data.current_weather.temperature)}°C`) } catch (e) {}
   }
 
-  // --- LÓGICA INTELIGENTE DE ÁUDIO ---
+  // --- LÓGICA DE ÁUDIO E CHAMADA ---
   const processarNovaChamada = (chamada: Chamada, tocarSom: boolean) => {
     if (chamada.id <= ultimoIdProcessado.current) return;
     ultimoIdProcessado.current = chamada.id
@@ -75,23 +84,20 @@ export default function TvPage() {
     setHistorico((prev) => { if (prev.find(c => c.id === chamada.id)) return prev; return [chamada, ...prev].slice(0, 4) })
 
     if (tocarSom && audioHabilitado) {
-        
-        // 1. Caso Mudo
         if (tipoAlerta === 'mudo') return;
 
-        const audioBeep = new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg') 
+        // TOCA O SOM (Personalizado ou Padrão)
+        const audioSrc = urlMp3Personalizado || '/alerta.mp3'
+        const audioBeep = new Audio(audioSrc) 
         
-        // 2. Caso Apenas Som ou Completo: Toca o beep
         if (tipoAlerta === 'completo' || tipoAlerta === 'apenas_som') {
             audioBeep.play().catch(() => {})
         }
 
-        // 3. Caso Apenas Voz ou Completo: Fala a senha
         if (tipoAlerta === 'apenas_voz') {
             falarSenha(`Senha ${chamada.senha_numero}, ${chamada.guiche_nome}`)
         } else if (tipoAlerta === 'completo') {
-            // Espera 1s (tempo do beep) para falar
-            setTimeout(() => falarSenha(`Senha ${chamada.senha_numero}, ${chamada.guiche_nome}`), 1000)
+            setTimeout(() => falarSenha(`Senha ${chamada.senha_numero}, ${chamada.guiche_nome}`), 1000) // Espera o ding terminar
         }
     }
   }
@@ -101,13 +107,14 @@ export default function TvPage() {
     if (data) processarNovaChamada(data, tocarSom)
   }
 
+  // --- LÓGICA DE ROTAÇÃO DE NOTÍCIAS SEQUENCIAL ---
   useEffect(() => {
     if (!exibirNoticias || noticias.length === 0) return
     const intervalo = setInterval(() => {
       setIndiceNoticia((prev) => {
           const proximo = prev + 1
           
-          // CORREÇÃO: Alterna sequencialmente entre as fontes cadastradas
+          // Se acabaram as notícias desta fonte, vai para a próxima fonte da lista
           if (proximo >= noticias.length) { 
               indiceFonteAtual.current = (indiceFonteAtual.current + 1) % listaFontes.length;
               buscarNoticias(listaFontes[indiceFonteAtual.current]); 
@@ -121,20 +128,19 @@ export default function TvPage() {
   }, [noticias, tempoRotacao, exibirNoticias, listaFontes])
 
   useEffect(() => {
-    const channel = supabase.channel('chamadas-tv-v4').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'fe_chamadas' }, (payload) => processarNovaChamada(payload.new as Chamada, true)).subscribe()
+    const channel = supabase.channel('chamadas-tv-v5').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'fe_chamadas' }, (payload) => processarNovaChamada(payload.new as Chamada, true)).subscribe()
     const polling = setInterval(() => { if(audioHabilitado) buscarUltimaChamada(true) }, 3000)
     return () => { supabase.removeChannel(channel); clearInterval(polling) }
-  }, [audioHabilitado, tipoAlerta]) // IMPORTANTE: Recria o listener se o tipo de alerta mudar
+  }, [audioHabilitado, tipoAlerta, urlMp3Personalizado]) 
 
-
+  // --- SÍNTESE DE VOZ ---
   const falarSenha = (texto: string) => {
-    // 1. Tenta usar o Som do Fully Kiosk (Fire TV / Android)
+    // 1. Tenta usar o Fully Kiosk (Fire TV / Android)
     // @ts-ignore
     if (window.fully && typeof window.fully.textToSpeech === 'function') {
       // @ts-ignore
       window.fully.textToSpeech(texto);
       return;
-
     }
 
     // 2. Fallback: Navegador Padrão (PC / Chrome)
@@ -148,7 +154,9 @@ export default function TvPage() {
 
   const iniciarSistema = () => {
     setAudioHabilitado(true)
-    const audio = new Audio('https://actions.google.com/sounds/v1/alarms/beep_short.ogg')
+    // Toca o som personalizado ou padrão ao iniciar
+    const audioSrc = urlMp3Personalizado || '/alerta.mp3'
+    const audio = new Audio(audioSrc)
     audio.play().catch(() => {})
   }
 
