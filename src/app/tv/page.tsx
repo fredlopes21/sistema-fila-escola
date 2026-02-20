@@ -75,13 +75,26 @@ export default function TvPage() {
       try { const res = await fetch('https://api.open-meteo.com/v1/forecast?latitude=-21.17&longitude=-47.81&current_weather=true'); const data = await res.json(); setClima(`${Math.round(data.current_weather.temperature)}°C`) } catch (e) {}
   }
 
-  // --- LÓGICA DE ÁUDIO E CHAMADA ---
+ // --- LÓGICA DE ÁUDIO E CHAMADA ---
   const processarNovaChamada = (chamada: Chamada, tocarSom: boolean) => {
     if (chamada.id <= ultimoIdProcessado.current) return;
     ultimoIdProcessado.current = chamada.id
     
     setUltimaChamada(chamada)
-    setHistorico((prev) => { if (prev.find(c => c.id === chamada.id)) return prev; return [chamada, ...prev].slice(0, 4) })
+    
+    // CORREÇÃO AQUI: Impede a duplicação no histórico
+    setHistorico((prev) => { 
+        if (prev.find(c => c.id === chamada.id)) return prev; 
+        
+        // Se for uma repetição (mesmo número), apenas atualiza a "Atual" e não empurra o histórico
+        if (prev.length > 0 && prev[0].senha_numero === chamada.senha_numero) {
+             const novoHistorico = [...prev];
+             novoHistorico[0] = chamada;
+             return novoHistorico;
+        }
+
+        return [chamada, ...prev].slice(0, 4) 
+    })
 
     if (tocarSom && audioHabilitado) {
         if (tipoAlerta === 'mudo') return;
