@@ -30,7 +30,8 @@ export default function TvPage() {
   const [urlMp3Personalizado, setUrlMp3Personalizado] = useState('')
   
   const ultimoIdProcessado = useRef<number>(0)
-  const indiceFonteAtual = useRef<number>(0);
+  const indiceFonteAtual = useRef<number>(0)
+  const audioAlertaRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     async function carregarDados() {
@@ -97,21 +98,27 @@ export default function TvPage() {
     })
 
     if (tocarSom && audioHabilitado) {
-        if (tipoAlerta === 'mudo') return;
+        if (tipoAlerta === 'mudo') return
 
-        // TOCA O SOM (Personalizado ou Padrão)
-        const audioSrc = urlMp3Personalizado || '/alerta.mp3'
-        const audioBeep = new Audio(audioSrc) 
-        
-        if (tipoAlerta === 'completo' || tipoAlerta === 'apenas_som') {
-            audioBeep.play().catch(() => {})
-        }
+        const texto = `Senha ${chamada.senha_numero}, ${chamada.guiche_nome}`
 
         if (tipoAlerta === 'apenas_voz') {
-            falarSenha(`Senha ${chamada.senha_numero}, ${chamada.guiche_nome}`)
-        } else if (tipoAlerta === 'completo') {
-            setTimeout(() => falarSenha(`Senha ${chamada.senha_numero}, ${chamada.guiche_nome}`), 1000) // Espera o ding terminar
+            falarSenha(texto)
+            return
         }
+
+        const audioBeep = audioAlertaRef.current
+        if (!audioBeep) {
+            if (tipoAlerta === 'completo') falarSenha(texto)
+            return
+        }
+
+        audioBeep.pause()
+        audioBeep.currentTime = 0
+        audioBeep.onended = tipoAlerta === 'completo' ? () => falarSenha(texto) : null
+        audioBeep.play().catch(() => {
+            if (tipoAlerta === 'completo') falarSenha(texto)
+        })
     }
   }
 
@@ -166,11 +173,18 @@ export default function TvPage() {
   }
 
   const iniciarSistema = () => {
-    setAudioHabilitado(true)
-    // Toca o som personalizado ou padrão ao iniciar
     const audioSrc = urlMp3Personalizado || '/alerta.mp3'
     const audio = new Audio(audioSrc)
-    audio.play().catch(() => {})
+    audio.preload = 'auto'
+    audio.load()
+    audioAlertaRef.current = audio
+    setAudioHabilitado(true)
+
+    // O primeiro play, iniciado pelo clique do usuário, libera o áudio no navegador/TV.
+    audio.play().then(() => {
+      audio.pause()
+      audio.currentTime = 0
+    }).catch(() => {})
   }
 
   const noticiaAtual = noticias[indiceNoticia]
