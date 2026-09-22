@@ -22,25 +22,30 @@ export default function AtendentePage() {
     carregarUltimaSenha()
   }, [])
 
-  function verificarLogin() {
-    const sessao = localStorage.getItem('fila_usuario')
-    if (!sessao) {
-        router.push('/login')
-        return
-    }
-    const user = JSON.parse(sessao)
-    setUsuario(user)
+  async function verificarLogin() {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { router.replace('/login'); return }
 
-    if (user.fe_guiches) {
-        setNomeGuiche(user.fe_guiches.nome)
-    } else {
-        setNomeGuiche('Sem Guichê Vinculado')
+    const { data: perfil } = await supabase
+      .from('profiles')
+      .select('id, full_name, email, can_access_fila, fila_role, fila_guiche_id, fe_guiches:fila_guiche_id(nome)')
+      .eq('id', user.id)
+      .single()
+
+    if (!perfil?.can_access_fila) {
+      await supabase.auth.signOut()
+      router.replace('/login')
+      return
     }
+    if (perfil.fila_role === 'admin') { router.replace('/admin'); return }
+
+    setUsuario(perfil)
+    setNomeGuiche((perfil.fe_guiches as any)?.nome || 'Sem Guichê Vinculado')
   }
 
-  function logout() {
-    localStorage.removeItem('fila_usuario')
-    router.push('/login')
+  async function logout() {
+    await supabase.auth.signOut()
+    router.replace('/login')
   }
 
   async function carregarUltimaSenha() {
@@ -112,9 +117,9 @@ export default function AtendentePage() {
         <div className="flex items-center gap-4">
             <div className="text-right hidden md:block">
                 <div className="text-sm font-bold text-gray-700 flex items-center gap-1 justify-end">
-                    <User className="w-3 h-3"/> {usuario?.nome}
+                    <User className="w-3 h-3"/> {usuario?.full_name}
                 </div>
-                <div className="text-xs text-gray-400">Logado como {usuario?.login}</div>
+                <div className="text-xs text-gray-400">{usuario?.email}</div>
             </div>
             <button onClick={logout} className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-all" title="Sair">
                 <LogOut className="w-5 h-5"/>
