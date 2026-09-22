@@ -32,29 +32,49 @@ export default function AdminPage() {
   const [urlMp3Personalizado, setUrlMp3Personalizado] = useState('')
   const [fazendoUpload, setFazendoUpload] = useState(false)
 
-  // DADOS USUÁRIOS
+  // EQUIPE - usuários centralizados do Apps Marista
   const [usuarios, setUsuarios] = useState<any[]>([])
-  const [novoUserNome, setNovoUserNome] = useState('')
-  const [novoUserLogin, setNovoUserLogin] = useState('')
-  const [novoUserSenha, setNovoUserSenha] = useState('')
-  const [novoUserGuiche, setNovoUserGuiche] = useState('')
-  const [editandoUserId, setEditandoUserId] = useState<number | null>(null)
+  const [buscaEquipe, setBuscaEquipe] = useState('')
+  const [filtroEquipe, setFiltroEquipe] = useState<'todos' | 'com_acesso' | 'sem_acesso' | 'atendente' | 'admin'>('todos')
+
+  const usuariosFiltrados = usuarios.filter((u) => {
+    const termo = buscaEquipe.trim().toLowerCase()
+    const correspondeBusca = !termo ||
+      (u.full_name || '').toLowerCase().includes(termo) ||
+      (u.email || '').toLowerCase().includes(termo)
+
+    const correspondeFiltro =
+      filtroEquipe === 'todos' ||
+      (filtroEquipe === 'com_acesso' && u.can_access_fila) ||
+      (filtroEquipe === 'sem_acesso' && !u.can_access_fila) ||
+      (filtroEquipe === 'atendente' && u.can_access_fila && u.fila_role === 'atendente') ||
+      (filtroEquipe === 'admin' && u.can_access_fila && u.fila_role === 'admin')
+
+    return correspondeBusca && correspondeFiltro
+  })
 
   useEffect(() => {
     verificarAcesso()
   }, [])
 
-  function verificarAcesso() {
-    const sessao = localStorage.getItem('fila_usuario')
-    if (!sessao) { router.push('/login'); return }
-    const usuario = JSON.parse(sessao)
-    if (usuario.perfil !== 'admin') { router.push('/atendente'); return }
+  async function verificarAcesso() {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { router.replace('/login'); return }
+
+    const { data: perfil } = await supabase
+      .from('profiles')
+      .select('can_access_fila, fila_role')
+      .eq('id', user.id)
+      .single()
+
+    if (!perfil?.can_access_fila) { await supabase.auth.signOut(); router.replace('/login'); return }
+    if (perfil.fila_role !== 'admin') { router.replace('/atendente'); return }
     carregarTudo()
   }
 
-  function logout() {
-    localStorage.removeItem('fila_usuario')
-    router.push('/login')
+  async function logout() {
+    await supabase.auth.signOut()
+    router.replace('/login')
   }
 
   async function carregarTudo() {
@@ -91,7 +111,10 @@ export default function AdminPage() {
     // 2. Guichês e Usuários
     const { data: g } = await supabase.from('fe_guiches').select('*').order('numero')
     if (g) setGuiches(g)
-    const { data: u } = await supabase.from('fe_usuarios').select('*, fe_guiches(nome)').order('nome')
+    const { data: u } = await supabase
+      .from('profiles')
+      .select('id, full_name, email, role, can_access_fila, fila_role, fila_guiche_id, fe_guiches:fila_guiche_id(nome)')
+      .order('full_name')
     if (u) setUsuarios(u)
 
     setLoading(false)
@@ -149,42 +172,30 @@ export default function AdminPage() {
     if (confirm('Excluir este guichê?')) { await supabase.from('fe_guiches').delete().eq('id', id); carregarTudo() }
   }
 
-  // --- AÇÕES DE USUÁRIOS ---
-  function iniciarEdicaoUsuario(u: any) {
-      setEditandoUserId(u.id)
-      setNovoUserNome(u.nome)
-      setNovoUserLogin(u.login)
-      setNovoUserSenha(u.senha)
-      setNovoUserGuiche(u.guiche_id ? u.guiche_id.toString() : '')
+  // --- CONTROLE DE ACESSO DA EQUIPE ---
+  async function atualizarAcessoFila(id: string, acesso: boolean) {
+    const atual = usuarios.find(u => u.id === id)
+    const { error } = await supabase.from('profiles').update({
+      can_access_fila: acesso,
+      fila_role: acesso ? (atual?.fila_role || 'atendente') : null,
+      fila_guiche_id: acesso ? atual?.fila_guiche_id : null
+    }).eq('id', id)
+    if (error) return alert('Erro ao atualizar acesso: ' + error.message)
+    carregarTudo()
   }
 
-  function cancelarEdicaoUsuario() {
-      setEditandoUserId(null)
-      setNovoUserNome('')
-      setNovoUserLogin('')
-      setNovoUserSenha('')
-      setNovoUserGuiche('')
+  async function atualizarPerfilFila(id: string, fila_role: 'admin' | 'atendente') {
+    const { error } = await supabase.from('profiles').update({ can_access_fila: true, fila_role }).eq('id', id)
+    if (error) return alert('Erro ao atualizar perfil: ' + error.message)
+    carregarTudo()
   }
 
-  async function salvarUsuario() {
-    if (!novoUserNome || !novoUserLogin || !novoUserSenha) return alert('Dados incompletos.')
-    const guicheId = novoUserGuiche ? parseInt(novoUserGuiche) : null
-    
-    if (editandoUserId) {
-        const { error } = await supabase.from('fe_usuarios').update({
-            nome: novoUserNome, login: novoUserLogin, senha: novoUserSenha, guiche_id: guicheId
-        }).eq('id', editandoUserId)
-        if (!error) { cancelarEdicaoUsuario(); carregarTudo() } else alert('Erro: ' + error.message)
-    } else {
-        const { error } = await supabase.from('fe_usuarios').insert({
-            nome: novoUserNome, login: novoUserLogin, senha: novoUserSenha, perfil: 'atendente', guiche_id: guicheId
-        })
-        if (!error) { cancelarEdicaoUsuario(); carregarTudo() } else alert(error.code === '23505' ? 'Login já existe!' : 'Erro: ' + error.message)
-    }
-  }
-
-  async function excluirUsuario(id: number) { 
-      if(confirm('Remover usuário?')) { await supabase.from('fe_usuarios').delete().eq('id', id); carregarTudo() } 
+  async function atualizarGuicheUsuario(id: string, valor: string) {
+    const { error } = await supabase.from('profiles').update({
+      fila_guiche_id: valor ? Number(valor) : null
+    }).eq('id', id)
+    if (error) return alert('Erro ao atualizar guichê: ' + error.message)
+    carregarTudo()
   }
 
   // --- AÇÕES DA TV & ÁUDIO ---
@@ -335,54 +346,63 @@ export default function AdminPage() {
             </div>
         )}
 
-        {/* ABA USUÁRIOS */}
+        {/* ABA EQUIPE */}
         {activeTab === 'usuarios' && (
-            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                <h2 className="text-lg font-bold mb-6">Equipe</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-                    {usuarios.map((u) => (
-                        <div key={u.id} className="border p-4 rounded flex justify-between items-center">
-                            <div>
-                                <div className="font-bold flex items-center gap-2">
-                                    {u.nome}
-                                    {u.perfil === 'admin' && <span className="text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full uppercase">Admin</span>}
-                                </div>
-                                <div className="text-sm text-slate-500">{u.login} | {u.fe_guiches?.nome || 'Sem Guichê'}</div>
-                            </div>
-                            <div className="flex gap-2">
-                                <button onClick={() => iniciarEdicaoUsuario(u)} className="text-blue-500 hover:text-blue-700 p-2"><Edit className="w-5 h-5"/></button>
-                                {u.perfil !== 'admin' && (
-                                    <button onClick={() => excluirUsuario(u.id)} className="text-red-500 hover:text-red-700 p-2"><Trash2 className="w-5 h-5"/></button>
-                                )}
-                            </div>
-                        </div>
-                    ))}
-                </div>
-                
-                <div className={`${editandoUserId ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-100'} p-5 rounded-lg border`}>
-                    <h3 className={`text-sm font-bold mb-4 flex items-center gap-2 ${editandoUserId ? 'text-amber-800' : 'text-emerald-800'}`}>
-                        {editandoUserId ? <Edit className="w-4 h-4"/> : <Plus className="w-4 h-4"/>} 
-                        {editandoUserId ? 'Editando Usuário' : 'Cadastrar Novo Atendente'}
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                        <input type="text" placeholder="Nome" className="p-2 rounded border text-slate-900 bg-white" value={novoUserNome} onChange={e => setNovoUserNome(e.target.value)}/>
-                        <input type="text" placeholder="Login" className="p-2 rounded border text-slate-900 bg-white" value={novoUserLogin} onChange={e => setNovoUserLogin(e.target.value)}/>
-                        <input type="text" placeholder="Senha" className="p-2 rounded border text-slate-900 bg-white" value={novoUserSenha} onChange={e => setNovoUserSenha(e.target.value)}/>
-                        <select className="p-2 rounded border bg-white text-slate-900" value={novoUserGuiche} onChange={e => setNovoUserGuiche(e.target.value)}>
-                            <option value="">Guichê...</option>
-                            {guiches.map(g => <option key={g.id} value={g.id}>{g.nome}</option>)}
-                        </select>
-                        <div className="col-span-full md:col-span-4 flex gap-2 mt-2">
-                            <button onClick={salvarUsuario} className={`flex-1 text-white py-2 rounded font-bold ${editandoUserId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
-                                {editandoUserId ? 'Atualizar Usuário' : 'Cadastrar Usuário'}
-                            </button>
-                            {editandoUserId && (
-                                <button onClick={cancelarEdicaoUsuario} className="bg-slate-300 text-slate-700 px-6 py-2 rounded font-bold hover:bg-slate-400">Cancelar</button>
-                            )}
-                        </div>
-                    </div>
-                </div>
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <div className="mb-6">
+              <h2 className="text-lg font-bold">Acessos ao Sistema de Filas</h2>
+              <p className="text-sm text-slate-500 mt-1">Os usuários e senhas são os mesmos dos Apps Marista. Aqui você apenas define quem pode acessar a fila e qual função terá.</p>
             </div>
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_240px] gap-3 mb-5">
+              <input
+                type="search"
+                value={buscaEquipe}
+                onChange={e => setBuscaEquipe(e.target.value)}
+                placeholder="Buscar por nome ou e-mail..."
+                className="w-full p-3 rounded-lg border border-slate-300 bg-white text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <select
+                value={filtroEquipe}
+                onChange={e => setFiltroEquipe(e.target.value as typeof filtroEquipe)}
+                className="w-full p-3 rounded-lg border border-slate-300 bg-white text-slate-900"
+              >
+                <option value="todos">Todos os usuários</option>
+                <option value="com_acesso">Com acesso à fila</option>
+                <option value="sem_acesso">Sem acesso à fila</option>
+                <option value="atendente">Atendentes</option>
+                <option value="admin">Administradores</option>
+              </select>
+            </div>
+            <div className="text-xs text-slate-400 mb-3">
+              Exibindo {usuariosFiltrados.length} de {usuarios.length} usuários
+            </div>
+            <div className="space-y-3">
+              {usuariosFiltrados.map((u) => (
+                <div key={u.id} className="border rounded-xl p-4 grid grid-cols-1 md:grid-cols-[1.5fr_auto_auto_1fr] gap-3 items-center">
+                  <div>
+                    <div className="font-bold">{u.full_name || 'Sem nome'}</div>
+                    <div className="text-xs text-slate-500">{u.email}</div>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm font-medium">
+                    <input type="checkbox" checked={!!u.can_access_fila} onChange={e => atualizarAcessoFila(u.id, e.target.checked)} />
+                    Acesso
+                  </label>
+                  <select disabled={!u.can_access_fila} value={u.fila_role || 'atendente'}
+                    onChange={e => atualizarPerfilFila(u.id, e.target.value as 'admin' | 'atendente')}
+                    className="p-2 rounded border bg-white text-slate-900 disabled:opacity-50">
+                    <option value="atendente">Atendente</option>
+                    <option value="admin">Administrador</option>
+                  </select>
+                  <select disabled={!u.can_access_fila || u.fila_role === 'admin'} value={u.fila_guiche_id || ''}
+                    onChange={e => atualizarGuicheUsuario(u.id, e.target.value)}
+                    className="p-2 rounded border bg-white text-slate-900 disabled:opacity-50">
+                    <option value="">Sem guichê</option>
+                    {guiches.map(g => <option key={g.id} value={g.id}>{g.nome}</option>)}
+                  </select>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
 
         {/* ABA NOTÍCIAS & TV */}
