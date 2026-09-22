@@ -34,6 +34,24 @@ export default function AdminPage() {
 
   // EQUIPE - usuários centralizados do Apps Marista
   const [usuarios, setUsuarios] = useState<any[]>([])
+  const [buscaEquipe, setBuscaEquipe] = useState('')
+  const [filtroEquipe, setFiltroEquipe] = useState<'todos' | 'com_acesso' | 'sem_acesso' | 'atendente' | 'admin'>('todos')
+
+  const usuariosFiltrados = usuarios.filter((u) => {
+    const termo = buscaEquipe.trim().toLowerCase()
+    const correspondeBusca = !termo ||
+      (u.full_name || '').toLowerCase().includes(termo) ||
+      (u.email || '').toLowerCase().includes(termo)
+
+    const correspondeFiltro =
+      filtroEquipe === 'todos' ||
+      (filtroEquipe === 'com_acesso' && u.can_access_fila) ||
+      (filtroEquipe === 'sem_acesso' && !u.can_access_fila) ||
+      (filtroEquipe === 'atendente' && u.can_access_fila && u.fila_role === 'atendente') ||
+      (filtroEquipe === 'admin' && u.can_access_fila && u.fila_role === 'admin')
+
+    return correspondeBusca && correspondeFiltro
+  })
 
   useEffect(() => {
     verificarAcesso()
@@ -335,8 +353,31 @@ export default function AdminPage() {
               <h2 className="text-lg font-bold">Acessos ao Sistema de Filas</h2>
               <p className="text-sm text-slate-500 mt-1">Os usuários e senhas são os mesmos dos Apps Marista. Aqui você apenas define quem pode acessar a fila e qual função terá.</p>
             </div>
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_240px] gap-3 mb-5">
+              <input
+                type="search"
+                value={buscaEquipe}
+                onChange={e => setBuscaEquipe(e.target.value)}
+                placeholder="Buscar por nome ou e-mail..."
+                className="w-full p-3 rounded-lg border border-slate-300 bg-white text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <select
+                value={filtroEquipe}
+                onChange={e => setFiltroEquipe(e.target.value as typeof filtroEquipe)}
+                className="w-full p-3 rounded-lg border border-slate-300 bg-white text-slate-900"
+              >
+                <option value="todos">Todos os usuários</option>
+                <option value="com_acesso">Com acesso à fila</option>
+                <option value="sem_acesso">Sem acesso à fila</option>
+                <option value="atendente">Atendentes</option>
+                <option value="admin">Administradores</option>
+              </select>
+            </div>
+            <div className="text-xs text-slate-400 mb-3">
+              Exibindo {usuariosFiltrados.length} de {usuarios.length} usuários
+            </div>
             <div className="space-y-3">
-              {usuarios.map((u) => (
+              {usuariosFiltrados.map((u) => (
                 <div key={u.id} className="border rounded-xl p-4 grid grid-cols-1 md:grid-cols-[1.5fr_auto_auto_1fr] gap-3 items-center">
                   <div>
                     <div className="font-bold">{u.full_name || 'Sem nome'}</div>
